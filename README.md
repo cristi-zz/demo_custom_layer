@@ -9,7 +9,12 @@ But do we really need the backward step, too?
 
 Use anaconda to create the env
 
-conda create -y --copy -c pytorch -n demo-layer python=3.9.2 numpy pytest matplotlib jupyterlab ipywidgets ipympl pytorch=1.12.0 cudatoolkit=10.2  
+    conda create -y --copy -c pytorch -n demo-layer python=3.9.2 numpy pytest matplotlib jupyterlab ipywidgets ipympl pytorch=1.12.0 cudatoolkit=10.2  
+
+Activate the env, then run:
+
+    conda install -c fastchan fastai
+
 
 
 ## Math

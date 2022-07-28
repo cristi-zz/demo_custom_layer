@@ -15,11 +15,13 @@ Activate the env, then run:
 
     conda install -c fastchan fastai
 
-
-
 ## Math
 
+Check the [attached PDF](https://github.com/cristi-zz/demo_custom_layer/blob/master/pdf/custom_layer_math_derivation.pdf) for the explanations on how the data and gradients must flow in the network.
+
 ## Code
+
+Go to ``src/`` folder and of course ``test/`` to see what's what. 
 
 ## Demo
 

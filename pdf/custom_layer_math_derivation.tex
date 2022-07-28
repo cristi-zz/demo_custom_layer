@@ -1,0 +1,433 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{calc}
+\setlength{\parindent}{0em}
+\usepackage{hyperref}
+\usepackage{dirtytalk}
+\usepackage{xcolor}
+
+% From https://latex.org/forum/viewtopic.php?t=11318
+\newcommand{\explain}[2]{\underbrace{{#1}}_{\parbox{\widthof{\ensuremath{#1}}}{\footnotesize\raggedright #2}}}
+
+\title{How to derive a custom layer in a neural network}
+\author{Cristi Vicas}
+\date{Jul 2022}
+\begin{document}
+\maketitle
+
+This is a support document for understanding how the bytes flow through a neural network. Then, I derive a layer that can learn the parameters of a Gaussian filter.
+
+I bet I am not the only one who can grasp the math behind the NNs but as soon as I close the explanations, everything gets wiped out! So I tried to gather explanations in one place. Traceable, just in case I screwed something. This document is for future me, when I will be hacking again at this low level. But maybe will help others, too. So, enjoy!
+
+\section{Chain rule in math}
+
+Let $F(x) = (f \circ g)(x) = f(g(x))$, where $\circ$ is the composition operator. That is, when we see $(f \circ g)(x)$ it means that the input will be processed by last function $g(x)$ then, the result, by the second to last function in the composition $f(g(x))$ so on, for all the functions in the composition.
+
+To compute the derivative of $F(x)$ math comes in our help with the chain rule:
+
+\begin{equation}
+	F'(x)=f'(g(x))g'(x)
+\end{equation}
+
+Above expression is what I learned during high school. But in ML we see other notation. If we write  $y = f(u)$ and $u = g(x)$, that is, we "blow" the composition rule from left to right and name each component, we can write:
+
+\begin{equation}
+	\frac{dy}{dx} = \frac{dy}{du}  \frac{du}{dx} \label{chain_rule}
+\end{equation}
+
+Rule of thumb? Add dummy variables for each internal function inside the composition. WARNING! when the pesky $d$ comes to play, these $du$ terms can't be readily simplified!
+ 
+\subsection{Example}
+Compute
+
+\begin{equation}
+	f(x) = \explain{\quad ln \quad}{That's our $f$}(\;\explain{x^{-4} + x^4}{That's our $g$}\;)
+\end{equation}
+First, we "blow out" the chain:
+\begin{eqnarray}
+	y = f(u) = ln(u) \\
+	u = g(x) = x^{-4} + x^4 \\
+	\frac{dy}{dx} = \explain{\quad\frac{d ln(u)}{d u}\quad}{Dummy variable $u$, only here}\explain{\frac{d(x^{-4} + x^4)}{dx}}{No $u$ here}
+\end{eqnarray}
+Then, we solve each derivative, independently. First one is a logarithm in $u$, the other is a polynomial in $x$.
+\begin{equation}
+	\frac{dy}{dx} = \frac{1}{u}(-4x^{-5} + 4x^3) 
+\end{equation}
+We know from our "dummy" replacement that $u=x^{-4} + x^4$. Replace and simplify (if you can):
+\begin{eqnarray}
+	\frac{dy}{dx}&=&\frac{1}{x^{-4} + x^4}(-4x^{-5} + 4x^3) \\
+	\frac{dy}{dx}&=&\frac{-4x^{-5} + 4x^3}{x^{-4} + x^4} 
+\end{eqnarray}
+
+Basically, replace the $u$ after computing the $f'$ with the content of $u$, that is, ($g(x)$). \\
+
+Source: \url{https://tutorial.math.lamar.edu/classes/calci/chainrule.aspx}
+
+\subsection{Multivariate functions}
+Let $z = f(x,y)$ and $x=g(t)$ and $y = h(t)$. Let us compute $\frac{dz}{dt}$
+
+\begin{equation}
+	\frac{dz}{dt} = \frac{\delta f}{\delta x}\frac{dx}{dt} + \frac{\delta f}{\delta y}\frac{dy}{dt}
+\end{equation}
+
+The $\frac{\delta f}{\delta x}$ means that we treat $f(x,y)$ as if $y$ is constant and $x$ is the only variable. Then, we derive.
+\\
+Source: \url{https://tutorial.math.lamar.edu/classes/calciii/chainrule.aspx}\\
+
+For now, that's all the math.
+
+
+\section{Extending PyTorch}
+
+The goal here is to add a new function to pytorch. A new type of layer. A new way of processing the input.\\
+
+Source: \url{https://pytorch.org/docs/stable/notes/extending.html}\\
+
+When extending pytorch one have to define a new Function. This Function will have a forward method, that will be applied
+to some inputs and generate the forward output. At a later stage, the backward method will be called with the gradients wrt to the output. The backward method have to return the gradients wrt to its inputs.
+
+Take care, as input is both the actual data and the weights/parameters of the function. So the gradient wrt to parameters will be applied to update the parameters (weights) and the gradients wrt to the "regular" inputs are forwarded to the next backprop step.
+
+We will try to reproduce a linear layer, no weights, with sigmoid activation, as a new function. And compare somehow, forward/backward steps, with a regular, sigmoid activated linear layer.\\
+
+\say{backward() - gradient formula. It will be given as many Tensor arguments as there were outputs, with each of them representing gradient w.r.t. that output. It should return as many Tensor s as there were inputs, with each of them containing the gradient w.r.t. its corresponding input. }\\
+
+\subsection{One layer net}
+
+Hmm, let's see if I got all the intuitions right. Basic example, one neuron, no activation and some loss.
+
+Notations:
+
+\begin{itemize}
+	\item Input $x$
+	\item Outgoing output (forward step, to the layer above) $a=x$. Later $a$ will be different
+	\item Weights (or one weight if there is one input): $w$
+	\item The weigthed input: $z =  w a$
+	\item Loss $l$, we don't care
+	\item Cost $C = l(z)$, Usually cost is a function of output, desired output and loss. Loss is a function, desired output do not change, they will not affect our incursions in the derivative world.
+\end{itemize}
+
+Pytorch wants from us the gradient of cost wrt to our inputs and to our weights. That is: 
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w} \\
+ 	\frac{\delta C}{\delta x}
+\end{eqnarray}
+
+And pytorch framework gives us 
+
+\begin{equation}
+	\frac{\delta C}{\delta z} \\
+\end{equation}
+
+Soo, the final cost is:
+\begin{eqnarray}
+	C&=&l(z(x))\\
+	C&=&l(w x)
+\end{eqnarray}
+
+Let's derivate $C$ with respect to $w$. We keep in mind the chain rule \eqref{chain_rule} and the expression of  $C = l(z)$:
+\begin{eqnarray}
+	\frac{\delta C}{\delta w}&=&\frac{\delta l(z)}{\delta z}\frac{\delta z}{\delta w}
+\end{eqnarray}
+
+We don't need dummy $u$, we already defined the $z$. Moving on with 2nd term, $z =  w x$:
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w}&=&\frac{\delta l(z)}{\delta z}\frac{\delta (w x)}{\delta w}
+\end{eqnarray}
+
+Also, we know the 1st term? $l(z)$ is $C$. Hmmmm:
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w}&=&\explain{\qquad\frac{\delta C}{\delta z}\qquad}{How nice, we have it from pytorch!}\explain{\quad\frac{\delta (w x)}{\delta w}\quad}{This is simple}
+\end{eqnarray}
+
+Some sort of empirical rule arise! When we want other derivatives, below our current level, we express them in terms to the known output! Let's see a more complex example.
+
+\subsection{A layer with activation}
+
+Let's do some notations. For one neuron, in layer $l$: 
+
+\begin{itemize}
+	\item Incoming inputs (from layer below) $a^{l-1}$ 
+	\item Outgoing output (forward step, to the layer above) $a^l$ 
+	\item Weights (or one weight if there is one input): $w^l$
+	\item The weigthed input: $z^l =  w^l a^{l-1}$
+	\item The activated output, $a^l{=}\sigma (z^l)$ with a sigmoid.
+\end{itemize}
+
+Also, the cost of the entire training step is $C$.
+I googled that
+\begin{equation}
+	\sigma' (x){=}\sigma(x)\left(1-\sigma(x)\right)
+\end{equation}
+
+Note that the activation is nothing fancy, "classical" sigmoid.\\
+
+Following the explanations on the PyTorch manual, for tha backward part of our Function object, we receive the cost gradient wrt to the outputs of the layer, that is:
+
+
+\begin{equation}
+	\frac{\delta C}{\delta a^l}
+\end{equation}
+
+We must compute the derivatives needed by the backwards functions. Focus on $C$ wrt to $w$:
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\explain{\qquad\frac{\delta C}{\delta a^l}\qquad}{This is what we know from pytorch}
+	\normalcolor\explain{\qquad\frac{\delta a^l}{\delta w^l}\qquad}{Because chain rule!}\\
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\frac{\delta C}{\delta a^l}
+	\normalcolor \explain{\qquad\frac{\delta \sigma(z^l)}{\delta w^l}\qquad}{We replaced the value of $a^l$}\\
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\frac{\delta C}{\delta a^l}
+	\normalcolor \explain{\quad \textcolor{purple}{\frac{\delta \sigma(z^l)}{\delta z^l}}\frac{\delta z^l}{\delta w^l}\quad}{Exploded using chain rule!}\\
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\frac{\delta C}{\delta a^l}
+	\color{purple}\explain{\qquad\frac{\delta \sigma(z^l)}{\delta z^l}\qquad}{Term only in $z^l$. From highschool, this is $\sigma'(z^l)$} \normalcolor \explain{\qquad\frac{\delta z^l}{\delta w^l}\qquad}{We'll go on exploding $z^l$}\\	
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\frac{\delta C}{\delta a^l} \color{purple} \sigma'(z^l)
+	\color{blue}\explain{\quad\frac{\delta w^l a^{l-1}}{\delta w^l}\quad}{This is simple}\\	
+	\frac{\delta C}{\delta w^l}&=&\color{teal}\frac{\delta C}{\delta a^l} \color{purple}\sigma'(z^l) \color{blue}a^{l-1}	
+\end{eqnarray}
+
+Checking various tutorials and official documentation, we see that the intuitions were correct!
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w^l} &=&\frac{\delta C}{\delta a^l} \sigma ' (z^l) a^{l-1}	 \\
+	\frac{\delta C}{\delta a^{l-1}}&=&\frac{\delta C}{\delta a^l} \sigma ' (z^l) w^l
+\end{eqnarray}
+
+We have the derivative of the cost wrt to our weights (this will be used by the optimizer to "teach" our layer's weights $w$) and the derivative of the cost wrt to our input layers (this will be the input to the backwards function of the layer below)
+
+So, we really don't care what is from the first function in the composition chain (usually the loss) up to our first function in our layer. Everything is nicely wrapped in the derivative of the cost wrt to our output. We need to mambo-jambo the math to return the derivative of the cost wrt to our input (to keep the chain going) and to our learnable parameters (to be able to descend on the Cost gradient).
+
+
+\subsection{For multi neuron layer}
+
+Ok, single neuron, conquered. For more neurons, we have to sum along various axis. Thoroughly deductions below, so I don't screw some sumations at the implementation time.\\
+
+
+From \url{http://neuralnetworksanddeeplearning.com/chap2.html#warm_up_a_fast_matrix-based_approach_to_computing_the_output_from_a_neural_network} \\
+
+Let:
+
+\begin{itemize}
+	\item $n^{l-1}$ be the number of inputs in layer $l$
+	\item $n^l$ be the number of outputs of the layer $l$
+	\item $w^l$ of size $(n^l, n^{l-1})$ be the weight matrix of the layer $l$
+	\item $\frac{\delta C}{\delta a^l}$ that is, the derivative of the cost function wrt to the output of the current layer, is known and "deduced" by the backpropagation algorithm before entering the backward() part of the layer's code
+\end{itemize}
+
+Let $w_{jk}^{l}$ be the weight inside layer $l$ that connects the $k$'th neuron in layer $(l-1)$ to the
+$j$'th neuron in layer $l$. Let $z^l_j$ be the weighted output of the neuron $j$ in layer $l$.
+
+Then, 
+
+\begin{equation}
+	z_j^l = \sum_{k}\left( w_{jk}^l a^{l-1}_k  \right)
+\end{equation}
+
+$w^l$ is a matrix of shape $n^l \times n^{l-1}$ so the product between $w^l$ and $a^{l-1}$ is  $(n^l, n^{l-1}) \times (n^{l-1}, 1) = (n^l, 1)$\\
+
+Knowing that $a^l{=}\sigma (z^l)$ and knowing from the gradient descent loop the value for  $\frac{\delta C}{\delta a^l}$ we can compute:
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta w^l_{jk}} &=& \frac{\delta C}{\delta a^l_j} \frac{\delta a^l_j}{\delta w^l_{jk}} \label{eq_dCost_dWeight}	 \\
+	\text{We know } a^l_j&=&\sigma (z^l_j) \\
+	\frac{\delta C}{\delta w^l_{jk}} &=&\frac{\delta C}{\delta a^l_j} \frac{\delta a^l_j}{\delta z^l_j} \frac{\delta z^l_j} {\delta w^l_{jk}}\\
+	&=&\frac{\delta C}{\delta a^l_j} \sigma ' (z^l_j) \frac{\delta z^l_j} {\delta w^l_{jk}}\\
+	\text{We know } z_j^l &=& \sum_{k}\left( w_{jk}^l a^{l-1}_k  \right)\\
+	\label{eq_sum_over_zj}
+	&=&\frac{\delta C}{\delta a^l_j} \sigma ' (z^l_j) \frac{\delta} {\delta w^l_{jk}}  \sum_{i}\left( w_{ji}^l a^{l-1}_k  \right) \\
+	&=&\frac{\delta C}{\delta a^l_j} \sigma ' (z^l_j) \left(a^{l-1}_k \right) \\
+\end{eqnarray}
+
+At equation \eqref{eq_sum_over_zj}, the derivative exists only if k == i. 
+
+Let the shape for $\frac{\delta C}{\delta a^l}$ be $(n^{l})$ and the shape of $\sigma ' (z^l_j)$ the same, $(n^{l})$. Then, the
+
+\begin{equation}
+	\frac{\delta C}{\delta w^l} = \left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right)^T * a^{l-1}
+\end{equation}
+
+where $\cdot$ is elementwise multiplication and $*$ is matrix multiplication.
+
+In the same manner,
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta a^{l-1}_k}&=&\frac{\delta C}{\delta a^l} \frac{\delta a^l}{\delta a^{l-1}}\\
+	a^l_j&=&\sigma (z^l_j)\\
+	z_j^l&=&\sum_{k}\left( w_{jk}^l a^{l-1}_k  \right)\\
+	... &=& ...
+\end{eqnarray}
+
+\begin{equation}
+	\frac{\delta C}{\delta a^{l-1}} = \left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right) *w^{l}
+\end{equation}
+
+that is, $\left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right)$ have the size $(1, n^{l-1})$ and
+the w have the size $(n^l, n^{l-1})$ \\
+
+% In commit 376b25ecf from fast_learn repo is demonstrated that a custom Function, implementing the above operations computes both the forward step (outputs, cost) and the backward step (weight gradients and input gradients) identical to a regular PyTorch linear+sigmoid layer.
+
+\section{Custom layer with Gauss Kernel}
+
+I want to filter my data with a Gauss kernel. The mean $\mu$ and standard deviation $\sigma$ of the filter should be learned from the data. So we must have the derivatives for them!
+
+Oh, cherry on top, because reasons, the mean is not zero. The convolution filter will be asymetric.
+
+\subsection{Gauss Filter}
+
+A Gauss kernel is:
+
+\begin{equation}
+	g(m) = \frac{1}{\sigma \sqrt{2 \pi}}e^{-\frac{1}{2} \frac{(m - \mu)^2}{\sigma^2}}
+\end{equation}
+
+%where $g(m)=0$ for $m-\mu > 0$
+
+The derivative with respect to $\sigma$ is:
+
+\begin{eqnarray}
+	\frac{d g}{d \sigma}&=&\frac{1}{\sqrt{2 \pi}} \explain{\frac{d}{d \sigma}\left( \frac{1}{\sigma} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \right)}{We apply product rule here}\\
+	&=&\frac{1}{\sqrt{2 \pi}} \frac{1}{\sigma} \frac{d}{d \sigma} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}+
+	\frac{1}{\sqrt{2 \pi}} \left( \frac{d}{d \sigma} \frac{1}{\sigma} \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=&\frac{1}{\sqrt{2 \pi}} \frac{1}{\sigma} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \frac{d}{d \sigma} \left(-1/2 \left(\frac{m - \mu}{\sigma} \right)^2 \right) \nonumber \\&&+ \frac{1}{\sqrt{2 \pi}} \frac{-1}{\sigma^2} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=&\frac{1}{\sqrt{2 \pi}} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \left( \frac{(m-\mu)^2}{\sigma^4}  - \frac{1}{\sigma ^2} \right)
+\end{eqnarray}
+
+The derivative wrt to $\mu$ is:
+
+\begin{eqnarray}
+	\frac{d g}{d \mu}&=&\frac{1}{\sigma \sqrt{2 \pi}}\frac{d}{d \mu}\left( -\frac{1}{2} \left(\frac{x-\mu}{\sigma}\right)^2 \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \\
+	&=&\frac{1}{\sigma \sqrt{2 \pi}} \frac{1}{2 \sigma ^2} 2 (m-\mu)  e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=& \frac{m - \mu}{\sigma ^3 \sqrt{2 \pi}} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}	
+
+
+and in a simila manner, wrt to $m$ because the chain rule must go on:
+
+\begin{eqnarray}
+	\frac{d g}{d m}&=&\frac{1}{\sigma \sqrt{2 \pi}}\frac{d}{d m}\left( -\frac{1}{2} \left(\frac{x-\mu}{\sigma}\right)^2 \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \\
+	&=& \frac{\mu-m}{\sigma ^3 \sqrt{2 \pi}} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}	
+
+
+\subsection{Unscaled Gaussian derivatives}
+One can compute	the unscaled versions, that is:
+
+\begin{equation}
+	g(m) = e^{-\frac{1}{2} \frac{(m - \mu)^2}{\sigma^2}}
+\end{equation}
+
+
+The unscaled derivative with respect to $\sigma$ is:
+
+\begin{eqnarray}
+	\frac{d g}{d \sigma}&=&\frac{d}{d \sigma}\left(e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \right) \\
+	&=&\frac{d}{d \sigma} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=&e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \frac{d}{d \sigma} \left(-1/2 \left(\frac{m - \mu}{\sigma} \right)^2 \right) \\
+	&=&-\frac{1}{2} \frac{d}{d \sigma} \left((m-\mu)^2 \sigma^{-2} \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=&\frac{(m-\mu)^2}{\sigma^3}e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}
+
+
+The unscaled derivative wrt to $\mu$ is:
+
+\begin{eqnarray}
+	\frac{d g}{d \mu}&=&\frac{d}{d \mu}\left( -\frac{1}{2} \left(\frac{x-\mu}{\sigma}\right)^2 \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \\
+	&=&\frac{1}{2 \sigma ^2} 2 (m-\mu)  e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}\\
+	&=& \frac{m - \mu}{\sigma ^2} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}	
+
+
+and in a simila manner, the unscaled version wrt to $m$:
+
+\begin{eqnarray}
+	\frac{d g}{d m}&=&\frac{d}{d m}\left( -\frac{1}{2} \left(\frac{x-\mu}{\sigma}\right)^2 \right) e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \\
+	&=& \frac{\mu-m}{\sigma ^2} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}	
+
+
+\subsection{Deriving the layer's equations}
+
+The layer have as input, a vector $X$ of length	$N$, and two parameters, $\sigma, \mu$. The output is a vector $O$ of length $N$. The output is a convolution of the input $X$ with a kernel $g$ defined above.\\
+
+We also know (by the def of the layer) that:
+
+\begin{equation}
+	O(n) = \sum_{m=-M/2}^{M/2} X(n-m)g(m)
+\end{equation}
+
+
+The whole network have a cost $C$. The gradient for this cost, is backpropagated and we know, as input to the backwards step, the $\frac{\delta C}{\delta O}$, that is the gradient of the cost wrt to each of the layer's outputs. 
+
+As in \eqref{eq_dCost_dWeight} we need to determine eg $\frac{dC}{d\mu}$ by knowing $\frac{dC}{dO}$. So, here, we need to determine $\frac{dO}{d\mu}$ so the chain rule can be applied. Let's see how the summation unrolls. We know that $\mu$ is one scalar so $\frac{dC}{d\mu}$ must be also a scalar.
+
+\begin{eqnarray}
+	\label{eq_cost_wrt_to_mu}
+	\frac{dC}{d\mu}&=&\sum_n \frac{\delta C}{\delta O(n)} \frac{\delta O(n)}{\delta \mu} 
+\end{eqnarray}
+
+The layer derivative equations:
+
+\begin{eqnarray}
+	\frac{\delta O(n)}{\delta\mu}&=& \frac{\delta}{\delta \mu} \sum_m X(n-m)g(m)\\
+	&=&\sum_m \frac{\delta}{\delta \mu} X(n-m)g(m) \\
+	&=&\sum_m X(n-m) \frac{\delta}{\delta \mu} g(m) \\
+	\label{eq_on_wrt_to_mu}
+	&=&\sum_m X(n-m) \frac{m - \mu}{\sigma ^3 \sqrt{2 \pi}} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2}
+\end{eqnarray}
+
+We take the \eqref{eq_on_wrt_to_mu} and do the elementwise product as in \eqref{eq_cost_wrt_to_mu} to get to $\frac{dC}{d\mu}$. So we will have a convolution of the original signal with a kernel ( as shown in \eqref{eq_on_wrt_to_mu}) and then the result, elementwise multiplied with the output gradient. The product is summed up and this is the gradient wrt to the $\mu$.\\
+
+In a similar fashion:
+
+
+\begin{eqnarray}
+	\frac{\delta O(n)}{\delta\sigma}&=& \sum_m \frac{\delta}{\delta \mu} X(n-m)g(m) \\
+	&=&\sum_m X(n-m) \frac{\delta}{\delta \mu} g(m) \\
+	&=&\sum_m X(n-m) \frac{1}{\sqrt{2 \pi}} e^{-\frac{1}{2} \left(\frac{m - \mu}{\sigma}\right)^2} \left( \frac{(m-\mu)^2}{\sigma^4}  - \frac{1}{\sigma ^2} \right)
+\end{eqnarray}
+
+To derive $\frac{\delta O}{\delta X}$ we have to understand how data flows from input to output. We have at input, a vector of values $X(i)$. Those, are convoluted, and each $X(i)$ participate in each output value, $O(k)$. Because of this, we know that each output is affected by each input.
+
+When providing the backpropagation derivatives one might expect that the $\frac{\delta C}{\delta X}$ (which is one number) is a sumation over all inputs $X(i)$. Moreover, the chain rule derivative, applied so we will have the known term $\frac{\delta C}{\delta O}$ that is, how the cost varies wrt to each output, must consider that each input affects each output.
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta X(i)}&=& \sum_{k}  \frac{\delta C}{\delta O(k)} \frac{\delta O(k)}{\delta X(i)}
+\end{eqnarray}
+
+Focusing on $\frac{\delta O(k)}{\delta X(i)}$:
+
+\begin{eqnarray}
+	\frac{\delta O(k)}{\delta X(i)}&=&\frac{\delta}{\delta X(i)} \sum_{m} X(k - m) g(m)\\
+	k-m&=&i, \text{to have a non null derivative}\\
+	&=&g(k-i)
+\end{eqnarray}
+
+Plugging back in the previous equation
+
+\begin{eqnarray}
+	\frac{\delta C}{\delta X(i)}&=& \sum_{k}  \frac{\delta C}{\delta O(k)} \frac{\delta O(k)}{\delta X(i)}\\
+	&=&\sum_{k}\frac{\delta C}{\delta O(k)} g(k-i) \\
+	&=&\sum_{k}\frac{\delta C}{\delta O}(k) g(k-i)
+\end{eqnarray}
+
+The final equation is the correlation (not convolution) between the derivative wrt to the output (known quantity) and the kernel. If the kernel is symmetric, this is just convolution.
+
+% In commit 90196 implemented and tested using numerical differences (gradcheck() function in pytorch)
+
+\subsubsection{Multuiple outputs per input}
+
+In some cases one wants to have one input convoluted with many kernels and for each convolution to have only one output. In this case, there will be one cost per output as defined in previous equations. For this particular case, the gradient wrt to that input is just the output gradient multiplied by the flipped kernel:
+
+\begin{equation}
+	\frac{\delta C}{\delta X(i)} = \frac{\delta C}{\delta O}g(k-i)
+\end{equation}
+
+The variable $i$ will iterate through whole input.
+
+But, stepping back one step, sometimes we want to have multiple kernels. In this case each input will "draw" its gradient from each of such output. So we will have to sum in that direction.
+	
+\end{document}

@@ -66,7 +66,7 @@ class GaussianConvFunction_simple(torch.autograd.Function):
         kernel_base = torch.exp(-1 * torch.square(kernel_base) / (2 * sigma * sigma))
         kernel = kernel_base / (sigma * np.sqrt(2 * np.pi))
         kernel = kernel.to(input.dtype)
-        kernel = kernel.flip(0) # Because conv1d == freakin' cross correlation
+        kernel = kernel.flip(0)  # Because conv1d == freakin' cross correlation
         out_signal = nn.functional.conv1d(input.unsqueeze(0), kernel.view(1, 1, -1),padding=pad)
         ctx.save_for_backward(input, kernel_support, kernel_base, mu, sigma, out_signal)
         return out_signal.squeeze(0)
@@ -111,3 +111,26 @@ class GaussConvLayer_simple(nn.Module):
     def forward(self, input):
         out = GaussianConvFunction_simple.apply(input, self.sigma, self.mu)
         return out
+
+class GaussConvLayer_nobackwards(nn.Module):
+    """
+    Apply the forward step of a Gauss filter. No backward() implementation
+
+    The module stores the sigma and mu parameters
+    """
+    def __init__(self):
+        super().__init__()
+        self.sigma = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
+        self.sigma.data[0] = 1
+        self.mu = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
+
+    def forward(self, input):
+        nk, pad = GaussianConvFunction_simple.get_padding(input.shape[1])  # compute padding so out signal len == in signal len
+        kernel_support = torch.arange(-nk/2, nk/2, 1, dtype=input.dtype, requires_grad=False)
+        kernel_base = kernel_support - self.mu
+        kernel_base = torch.exp(-1 * torch.square(kernel_base) / (2 * self.sigma * self.sigma))
+        kernel = kernel_base / (self.sigma * np.sqrt(2 * np.pi))
+        kernel = kernel.to(input.dtype)
+        kernel = kernel.flip(0)
+        out_signal = nn.functional.conv1d(input.unsqueeze(0), kernel.view(1, 1, -1),padding=pad)
+        return out_signal.squeeze(0)

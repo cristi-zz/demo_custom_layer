@@ -2,12 +2,15 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
-import custom_layers
+from torch.profiler import profile, record_function, ProfilerActivity
 from fastcore.foundation import L
 from fastai.data.transforms import TfmdLists, DataLoaders, RandomSplitter, ToTensor
 from fastai.losses import MSELossFlat
 from fastai.learner import Learner
 import fastai.callback.schedule   # Needed for fit_one_cycle
+import time
+
+import custom_layers
 
 def test_createLinearFunc():
     """
@@ -194,3 +197,85 @@ def test_train_gaussLayer_with_simple_data():
 
     assert model.mu.detach() == pytest.approx(target_mu, abs=0.5)
     assert model.sigma.detach() == pytest.approx(target_sigma, abs=0.5)
+
+
+def test_GaussConvLayer_nobackwards_same_output():
+    """
+    Tests that the forward Gauss impl without a backward is correct.
+    """
+    signal_len = 99
+    np.random.seed(3345)
+    asin = np.sin(np.linspace(0, 1 * 2 * np.pi, signal_len))
+    signal = np.random.rand(signal_len) * asin
+
+    gaussLayer = custom_layers.GaussConvLayer_nobackwards()
+    input = torch.from_numpy(signal).to(torch.float32).view(1, -1)
+    input.requires_grad = True
+    gaussLayer.sigma.data[0] = 4.5
+    gaussLayer.mu.data[0] = -19.5
+
+    nk = signal_len - (1 - signal_len % 2)
+    kernel_support = np.arange(-nk/2, nk/2, 1)
+    kernel = gen_gauss(kernel_support, 4.5, -19.5)
+    signal_convolved = np.convolve(signal, kernel, mode='same')
+
+    out_vector = gaussLayer(input)
+    out_vector_arr = out_vector.squeeze(0).detach().numpy()
+
+    assert np.allclose(out_vector_arr, signal_convolved), "Forward output signal mistmatch."
+
+
+def test_profile_training_times():
+    N = 500
+    sample_len = 100
+    target_sigma = 3
+    target_mu = -11.5
+    work_base = "dump"
+
+    signal = generate_data_for_one_feature_gauss_test(N, sample_len, True)  # A bunch of signals
+
+    nk = sample_len - (1 - sample_len % 2)
+    kernel_support = np.arange(-nk/2, nk/2, 1)
+    kernel = gen_gauss(kernel_support, target_sigma, target_mu)  # A Gauss kernel
+
+    # We filter each signal, with the same asymetric kernel
+    gt_signal = []
+    for k in range(N):
+        gt_sample = np.convolve(signal[k, :], kernel, mode='same')
+        gt_signal.append(gt_sample)
+    gt_signal = np.array(gt_signal).astype(np.float32)
+
+    train_samples = zip(signal, gt_signal)
+    train_samples = L(train_samples)
+
+    splits = RandomSplitter(0.1)(train_samples)
+    tls_train = TfmdLists(train_samples[splits[0]], [ToTensor()])
+    dloaders = DataLoaders.from_dsets(tls_train, tls_train, bs=1, num_workers=1, device=torch.device('cpu'))
+
+    model_full = custom_layers.GaussConvLayer_simple().cpu()
+    learner_full = Learner(dloaders, model_full, loss_func=MSELossFlat(reduction="mean"), model_dir=work_base)
+
+    model_noback = custom_layers.GaussConvLayer_nobackwards().cpu()
+    learner_noback = Learner(dloaders, model_noback, loss_func=MSELossFlat(reduction="mean"), model_dir=work_base)
+
+    learner_full.fit_one_cycle(1, 1e-2)
+    t0 = time.time()
+    learner_full.fit_one_cycle(3, 1e-2)
+    t_full = time.time() - t0
+
+    learner_noback.fit_one_cycle(1, 1e-2)
+    t0 = time.time()
+    learner_noback.fit_one_cycle(3, 1e-2)
+    t_nobak = time.time() - t0
+
+    learner_full.fit_one_cycle(1, 1e-2)
+    t0 = time.time()
+    learner_full.fit_one_cycle(3, 1e-2)
+    t_full2 = time.time() - t0
+
+    learner_noback.fit_one_cycle(1, 1e-2)
+    t0 = time.time()
+    learner_noback.fit_one_cycle(3, 1e-2)
+    t_nobak2 = time.time() - t0
+
+    print(f"Full network definition {t_full}, {t_full2} seconds, Backward() handled by PyTorch: {t_nobak}, {t_nobak2} seconds")

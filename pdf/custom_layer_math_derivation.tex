@@ -247,7 +247,7 @@ At equation \eqref{eq_sum_over_zj}, the derivative exists only if k == i.
 Let the shape for $\frac{\delta C}{\delta a^l}$ be $(n^{l})$ and the shape of $\sigma ' (z^l_j)$ the same, $(n^{l})$. Then, the
 
 \begin{equation}
-	\frac{\delta C}{\delta w^l} = \left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right)^T * a^{l-1}
+	\frac{\delta C}{\delta w^l} = \left( \textcolor{blue}{\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j)} \right)^T * a^{l-1}
 \end{equation}
 
 where $\cdot$ is elementwise multiplication and $*$ is matrix multiplication.
@@ -262,7 +262,7 @@ In the same manner,
 \end{eqnarray}
 
 \begin{equation}
-	\frac{\delta C}{\delta a^{l-1}} = \left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right) *w^{l}
+	\frac{\delta C}{\delta a^{l-1}} = \left( \textcolor{blue}{\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j)} \right) *w^{l}
 \end{equation}
 
 that is, $\left(\frac{\delta C}{\delta a^l} \cdot \sigma ' (z^l_j) \right)$ have the size $(1, n^{l-1})$ and

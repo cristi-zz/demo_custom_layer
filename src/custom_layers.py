@@ -126,7 +126,7 @@ class GaussConvLayer_nobackwards(nn.Module):
 
     def forward(self, input):
         nk, pad = GaussianConvFunction_simple.get_padding(input.shape[1])  # compute padding so out signal len == in signal len
-        kernel_support = torch.arange(-nk/2, nk/2, 1, dtype=input.dtype, requires_grad=False)
+        kernel_support = torch.arange(-nk/2, nk/2, 1, dtype=input.dtype, requires_grad=False).to(input.device)
         kernel_base = kernel_support - self.mu
         kernel_base = torch.exp(-1 * torch.square(kernel_base) / (2 * self.sigma * self.sigma))
         kernel = kernel_base / (self.sigma * np.sqrt(2 * np.pi))

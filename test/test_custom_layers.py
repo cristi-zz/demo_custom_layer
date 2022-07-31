@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
-from torch.profiler import profile, record_function, ProfilerActivity
 from fastcore.foundation import L
 from fastai.data.transforms import TfmdLists, DataLoaders, RandomSplitter, ToTensor
 from fastai.losses import MSELossFlat
@@ -97,7 +96,6 @@ def gen_gauss(x_arr, sigma, miu):
     gauss_kern = gauss_kern * 1 / (sigma * np.sqrt(2*np.pi))
 
     return gauss_kern
-
 
 
 def test_create_gauss_func_forward():

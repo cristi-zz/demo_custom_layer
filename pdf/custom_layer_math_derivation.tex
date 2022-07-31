@@ -17,7 +17,6 @@
 \begin{document}
 \maketitle
 
-This is a support document for understanding how the bytes flow through a neural network. Then, I derive a layer that can learn the parameters of a Gaussian filter.
 
 I bet I am not the only one who can grasp the math behind the NNs but as soon as I close the explanations, everything gets wiped out! So I tried to gather explanations in one place. Traceable, just in case I screwed something. This document is for future me, when I will be hacking again at this low level. But maybe will help others, too. So, enjoy!
 
@@ -31,13 +30,15 @@ To compute the derivative of $F(x)$ math comes in our help with the chain rule:
 	F'(x)=f'(g(x))g'(x)
 \end{equation}
 
-Above expression is what I learned during high school. But in ML we see other notation. If we write  $y = f(u)$ and $u = g(x)$, that is, we "blow" the composition rule from left to right and name each component, we can write:
+Above expression is what I learned during high school. But in ML we see other notation. If we write  $y = f(u)$ and $\textcolor{red}{u = g(x)}$, that is, we "blow" the composition rule from left to right and name each component, we can write:
 
 \begin{equation}
-	\frac{dy}{dx} = \frac{dy}{du}  \frac{du}{dx} \label{chain_rule}
+	\frac{dy}{dx} = \frac{dy}{\textcolor{red}{du}}  \frac{\textcolor{red}{du}}{dx} \label{chain_rule}
 \end{equation}
 
-Rule of thumb? Add dummy variables for each internal function inside the composition. WARNING! when the pesky $d$ comes to play, these $du$ terms can't be readily simplified!
+Look at that $\textcolor{red}{u}$, is very important. This substitution is ubiquitos in chain rule.\\
+
+Rule of thumb? Add dummy variables for each internal function inside the composition. WARNING! when the pesky $d$ comes to play, these $du$ terms can't be readily simplified! Unless your math is really strong!
  
 \subsection{Example}
 Compute
@@ -122,7 +123,7 @@ And pytorch framework gives us
 	\frac{\delta C}{\delta z} \\
 \end{equation}
 
-Soo, the final cost is:
+With our setup done, let's see how can we give PyTorch what it wants. We will start from the expression of the cost $C$, we will derive it and see how things fit. Soo, the final cost is:
 \begin{eqnarray}
 	C&=&l(z(x))\\
 	C&=&l(w x)
@@ -199,7 +200,7 @@ Checking various tutorials and official documentation, we see that the intuition
 
 We have the derivative of the cost wrt to our weights (this will be used by the optimizer to "teach" our layer's weights $w$) and the derivative of the cost wrt to our input layers (this will be the input to the backwards function of the layer below)
 
-So, we really don't care what is from the first function in the composition chain (usually the loss) up to our first function in our layer. Everything is nicely wrapped in the derivative of the cost wrt to our output. We need to mambo-jambo the math to return the derivative of the cost wrt to our input (to keep the chain going) and to our learnable parameters (to be able to descend on the Cost gradient).
+So, we really don't care what is from the first function in the composition chain (usually the loss) up to our first function in our layer. Everything is nicely wrapped in the derivative of the cost wrt to our output. We need to mambo-jambo our layer so the math will return the derivative of the cost wrt to our input (to keep the chain going) and to our learnable parameters (to be able to descend on the Cost gradient).
 
 
 \subsection{For multi neuron layer}

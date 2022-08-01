@@ -120,7 +120,7 @@ class GaussConvLayer_nobackwards(nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.sigma = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
+        self.sigma = nn.Parameter(torch.ones((1,), dtype=torch.float32))
         self.sigma.data[0] = 1
         self.mu = nn.Parameter(torch.zeros((1,), dtype=torch.float32))
 
@@ -134,3 +134,7 @@ class GaussConvLayer_nobackwards(nn.Module):
         kernel = kernel.flip(0)
         out_signal = nn.functional.conv1d(input.unsqueeze(0), kernel.view(1, 1, -1),padding=pad)
         return out_signal.squeeze(0)
+
+    def init_params(self):
+        self.sigma.data = torch.ones((1,), dtype=torch.float32, device=self.sigma.data.device)
+        self.mu.data = torch.zeros((1,), dtype=torch.float32, device=self.sigma.data.device)

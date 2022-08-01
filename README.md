@@ -9,7 +9,7 @@ But do we really need the backward step, too? Spoilers, usually no, but it's com
 
 Use anaconda to create the env
 
-    conda create -y --copy -c pytorch -n demo-layer python=3.9.2 numpy pytest matplotlib jupyterlab ipywidgets ipympl pytorch=1.12.0 cudatoolkit=10.2  
+    conda create -y --copy -c pytorch -n demo-layer python=3.9.2 numpy pytest matplotlib pillow jupyterlab ipywidgets ipympl pytorch=1.12.0 cudatoolkit=10.2
 
 Activate the env, then run:
 
@@ -24,5 +24,10 @@ Check the [attached PDF](https://github.com/cristi-zz/demo_custom_layer/blob/mas
 Go to ``src/`` folder and of course ``test/`` to see what's what. 
 
 ## Demo
+
+In [``src/demo.ipynb``](https://github.com/cristi-zz/demo_custom_layer/blob/master/src/demo.ipynb) I show how
+the network learns. 
+
+![](https://github.com/cristi-zz/demo_custom_layer/blob/master/src/fig3_learning.gif "Animation of the learning process")
 
 Enjoy!

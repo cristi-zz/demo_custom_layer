@@ -5,6 +5,8 @@ into my network that the problem you are dealing with, will become trivial to le
 Excellent! How do we do that? How to derive a custom layer in PyTorch? We need the forward and backward code for it! 
 But do we really need the backward step, too? Spoilers, usually no, but it's comforting to know that it can be done. 
 
+Read the story [in my blog post!](https://visoft.ro/machine-learning/custom-layer-in-pytorch/2022/08/01/)
+
 ## Setup
 
 Use anaconda to create the env
